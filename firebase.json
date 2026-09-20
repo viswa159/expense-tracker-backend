@@ -1,0 +1,11 @@
+{
+  "functions": {
+    "source": ".",
+    "ignore": [
+      ".firebase",
+      ".git",
+      "firebase-debug.log",
+      "node_modules/.cache"
+    ]
+  }
+}
