@@ -6,6 +6,7 @@ import { supabase } from "./db.js";
 
 const VALID_TRANSACTION_KINDS = new Set(["income", "expense"]);
 const VALID_PAYMENT_METHODS = new Set(["bank", "credit"]);
+const SUPABASE_PAGE_SIZE = 1000;
 const DEFAULT_ALLOWED_ORIGINS = new Set([
   "http://localhost:5173",
   "http://127.0.0.1:5173",
@@ -36,42 +37,71 @@ async function fetchCategories() {
   return data;
 }
 
-async function fetchTransactions({ requestedMonth, requestedYear }) {
-  let query = supabase
-    .from("trans")
-    .select("id, date, amount, transaction_kind, payment_method, category_id, description")
-    .order("date", { ascending: false })
-    .order("created_at", { ascending: false });
+async function fetchAllRows(buildQuery, fallbackMessage) {
+  const rows = [];
+  let from = 0;
 
-  if (
+  while (true) {
+    const to = from + SUPABASE_PAGE_SIZE - 1;
+    const { data, error } = await buildQuery(from, to);
+    if (error) {
+      throw createDatabaseError(error, fallbackMessage);
+    }
+
+    rows.push(...data);
+
+    if (data.length < SUPABASE_PAGE_SIZE) {
+      break;
+    }
+
+    from += SUPABASE_PAGE_SIZE;
+  }
+
+  return rows;
+}
+
+async function fetchTransactions({ requestedMonth, requestedYear }) {
+  const hasMonthFilter =
     Number.isInteger(requestedMonth) &&
     Number.isInteger(requestedYear) &&
     requestedMonth >= 1 &&
-    requestedMonth <= 12
-  ) {
-    const startDate = `${requestedYear}-${String(requestedMonth).padStart(2, "0")}-01`;
-    const nextYear = requestedMonth === 12 ? requestedYear + 1 : requestedYear;
-    const nextMonth = requestedMonth === 12 ? 1 : requestedMonth + 1;
-    const endDate = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
-    query = query.gte("date", startDate).lt("date", endDate);
-  }
+    requestedMonth <= 12;
+  const startDate = hasMonthFilter ? `${requestedYear}-${String(requestedMonth).padStart(2, "0")}-01` : null;
+  const nextYear = hasMonthFilter && requestedMonth === 12 ? requestedYear + 1 : requestedYear;
+  const nextMonth = hasMonthFilter ? (requestedMonth === 12 ? 1 : requestedMonth + 1) : null;
+  const endDate = hasMonthFilter ? `${nextYear}-${String(nextMonth).padStart(2, "0")}-01` : null;
 
-  const { data, error } = await query;
-  if (error) {
-    throw createDatabaseError(error, "Unable to load transactions");
-  }
+  const transactions = await fetchAllRows((from, to) => {
+    let query = supabase
+      .from("trans")
+      .select("id, date, amount, transaction_kind, payment_method, category_id, description")
+      .order("date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .range(from, to);
 
-  return data.map((transaction) => ({
+    if (hasMonthFilter) {
+      query = query.gte("date", startDate).lt("date", endDate);
+    }
+
+    return query;
+  }, "Unable to load transactions");
+
+  return transactions.map((transaction) => ({
     ...transaction,
     date: typeof transaction.date === "string" ? transaction.date : String(transaction.date),
   }));
 }
 
 async function fetchBalances() {
-  const { data, error } = await supabase.from("trans").select("amount, transaction_kind, payment_method");
-  if (error) {
-    throw createDatabaseError(error, "Unable to calculate balances");
-  }
+  const data = await fetchAllRows(
+    (from, to) =>
+      supabase
+        .from("trans")
+        .select("amount, transaction_kind, payment_method")
+        .order("id", { ascending: true })
+        .range(from, to),
+    "Unable to calculate balances"
+  );
 
   return data.reduce(
     (balances, transaction) => {
