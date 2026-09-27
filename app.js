@@ -2,7 +2,7 @@ import cors from "cors";
 import express from "express";
 import { v4 as uuidv4 } from "uuid";
 import { requireAllowedUser } from "./auth.js";
-import { pool } from "./db.js";
+import { supabase } from "./db.js";
 
 const VALID_TRANSACTION_KINDS = new Set(["income", "expense"]);
 const VALID_PAYMENT_METHODS = new Set(["bank", "credit"]);
@@ -17,6 +17,115 @@ function asyncHandler(handler) {
   return (req, res, next) => {
     Promise.resolve(handler(req, res, next)).catch(next);
   };
+}
+
+function createDatabaseError(error, fallbackMessage) {
+  const message =
+    typeof error?.message === "string" && error.message.trim() ? error.message : fallbackMessage;
+  const databaseError = new Error(message);
+  databaseError.cause = error;
+  return databaseError;
+}
+
+async function fetchCategories() {
+  const { data, error } = await supabase.from("categories").select("id, name").order("name");
+  if (error) {
+    throw createDatabaseError(error, "Unable to load categories");
+  }
+
+  return data;
+}
+
+async function fetchTransactions({ requestedMonth, requestedYear }) {
+  let query = supabase
+    .from("trans")
+    .select("id, date, amount, transaction_kind, payment_method, category_id, description")
+    .order("date", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  if (
+    Number.isInteger(requestedMonth) &&
+    Number.isInteger(requestedYear) &&
+    requestedMonth >= 1 &&
+    requestedMonth <= 12
+  ) {
+    const startDate = `${requestedYear}-${String(requestedMonth).padStart(2, "0")}-01`;
+    const nextYear = requestedMonth === 12 ? requestedYear + 1 : requestedYear;
+    const nextMonth = requestedMonth === 12 ? 1 : requestedMonth + 1;
+    const endDate = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
+    query = query.gte("date", startDate).lt("date", endDate);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    throw createDatabaseError(error, "Unable to load transactions");
+  }
+
+  return data.map((transaction) => ({
+    ...transaction,
+    date: typeof transaction.date === "string" ? transaction.date : String(transaction.date),
+  }));
+}
+
+async function fetchBalances() {
+  const { data, error } = await supabase.from("trans").select("amount, transaction_kind, payment_method");
+  if (error) {
+    throw createDatabaseError(error, "Unable to calculate balances");
+  }
+
+  return data.reduce(
+    (balances, transaction) => {
+      const amount = Number(transaction.amount);
+      if (!Number.isFinite(amount)) {
+        throw new Error("Balance response contains invalid values");
+      }
+
+      if (transaction.transaction_kind === "income") {
+        balances.accountBalance += amount;
+        balances.netBalance += amount;
+        return balances;
+      }
+
+      if (transaction.transaction_kind === "expense") {
+        balances.netBalance -= amount;
+        if (transaction.payment_method === "bank") {
+          balances.accountBalance -= amount;
+        }
+      }
+
+      return balances;
+    },
+    { accountBalance: 0, netBalance: 0 }
+  );
+}
+
+async function createTransaction(transaction) {
+  const { data, error } = await supabase
+    .from("trans")
+    .insert(transaction)
+    .select("id, date, amount, transaction_kind, payment_method, category_id, description")
+    .single();
+
+  if (error) {
+    throw createDatabaseError(error, "Unable to create transaction");
+  }
+
+  return data;
+}
+
+async function updateTransaction(id, transaction) {
+  const { data, error } = await supabase
+    .from("trans")
+    .update(transaction)
+    .eq("id", id)
+    .select("id, date, amount, transaction_kind, payment_method, category_id, description")
+    .maybeSingle();
+
+  if (error) {
+    throw createDatabaseError(error, "Unable to update transaction");
+  }
+
+  return data;
 }
 
 function getAllowedOrigins() {
@@ -103,8 +212,7 @@ export function createApp() {
   app.get(
     "/api/categories",
     asyncHandler(async (req, res) => {
-      const { rows } = await pool.query("SELECT id, name FROM categories ORDER BY name");
-      res.json(rows);
+      res.json(await fetchCategories());
     })
   );
 
@@ -113,52 +221,14 @@ export function createApp() {
     asyncHandler(async (req, res) => {
       const requestedMonth = Number(req.query.month);
       const requestedYear = Number(req.query.year);
-
-      let query = `SELECT t.id, to_char(t.date, 'YYYY-MM-DD') AS date, t.amount, t.transaction_kind,
-                        t.payment_method, t.category_id, t.description
-                   FROM trans t`;
-      const params = [];
-
-      if (
-        Number.isInteger(requestedMonth) &&
-        Number.isInteger(requestedYear) &&
-        requestedMonth >= 1 &&
-        requestedMonth <= 12
-      ) {
-        const startDate = `${requestedYear}-${String(requestedMonth).padStart(2, "0")}-01`;
-        const nextYear = requestedMonth === 12 ? requestedYear + 1 : requestedYear;
-        const nextMonth = requestedMonth === 12 ? 1 : requestedMonth + 1;
-        const endDate = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
-
-        query += " WHERE t.date >= $1 AND t.date < $2";
-        params.push(startDate, endDate);
-      }
-
-      query += " ORDER BY t.date DESC, t.created_at DESC";
-
-      const { rows } = await pool.query(query, params);
-      res.json(rows);
+      res.json(await fetchTransactions({ requestedMonth, requestedYear }));
     })
   );
 
   app.get(
     "/api/balances",
     asyncHandler(async (req, res) => {
-      const { rows } = await pool.query(
-        `SELECT
-           COALESCE(SUM(CASE WHEN transaction_kind = 'income' THEN amount ELSE 0 END), 0)
-           - COALESCE(SUM(CASE
-               WHEN transaction_kind = 'expense' AND payment_method = 'bank' THEN amount
-               ELSE 0
-             END), 0) AS account_balance,
-           COALESCE(SUM(CASE WHEN transaction_kind = 'income' THEN amount ELSE 0 END), 0)
-           - COALESCE(SUM(CASE WHEN transaction_kind = 'expense' THEN amount ELSE 0 END), 0)
-             AS net_balance
-         FROM trans`
-      );
-
-      const accountBalance = Number(rows[0].account_balance);
-      const netBalance = Number(rows[0].net_balance);
+      const { accountBalance, netBalance } = await fetchBalances();
       if (!Number.isFinite(accountBalance) || !Number.isFinite(netBalance)) {
         res.status(500).json({ error: "Unable to calculate balances" });
         return;
@@ -178,24 +248,17 @@ export function createApp() {
       }
 
       const id = uuidv4();
+      const transaction = await createTransaction({
+        id,
+        date: parsedPayload.value.date,
+        amount: parsedPayload.value.amount,
+        transaction_kind: parsedPayload.value.transaction_kind,
+        payment_method: parsedPayload.value.payment_method,
+        category_id: parsedPayload.value.category_id,
+        description: parsedPayload.value.description,
+      });
 
-      const { rows } = await pool.query(
-        `INSERT INTO trans (id, date, amount, transaction_kind, payment_method, category_id, description)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, to_char(date, 'YYYY-MM-DD') AS date, amount, transaction_kind,
-                   payment_method, category_id, description`,
-        [
-          id,
-          parsedPayload.value.date,
-          parsedPayload.value.amount,
-          parsedPayload.value.transaction_kind,
-          parsedPayload.value.payment_method,
-          parsedPayload.value.category_id,
-          parsedPayload.value.description,
-        ]
-      );
-
-      res.status(201).json(rows[0]);
+      res.status(201).json(transaction);
     })
   );
 
@@ -209,30 +272,21 @@ export function createApp() {
         return;
       }
 
-      const { rows } = await pool.query(
-        `UPDATE trans
-         SET date = $1, amount = $2, transaction_kind = $3,
-             payment_method = $4, category_id = $5, description = $6
-         WHERE id = $7
-         RETURNING id, to_char(date, 'YYYY-MM-DD') AS date, amount, transaction_kind,
-                   payment_method, category_id, description`,
-        [
-          parsedPayload.value.date,
-          parsedPayload.value.amount,
-          parsedPayload.value.transaction_kind,
-          parsedPayload.value.payment_method,
-          parsedPayload.value.category_id,
-          parsedPayload.value.description,
-          id,
-        ]
-      );
+      const transaction = await updateTransaction(id, {
+        date: parsedPayload.value.date,
+        amount: parsedPayload.value.amount,
+        transaction_kind: parsedPayload.value.transaction_kind,
+        payment_method: parsedPayload.value.payment_method,
+        category_id: parsedPayload.value.category_id,
+        description: parsedPayload.value.description,
+      });
 
-      if (rows.length === 0) {
+      if (!transaction) {
         res.status(404).json({ error: "Transaction not found" });
         return;
       }
 
-      res.json(rows[0]);
+      res.json(transaction);
     })
   );
 

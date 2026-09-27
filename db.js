@@ -1,15 +1,20 @@
-import pg from "pg";
 import "dotenv/config";
+import { createClient } from "@supabase/supabase-js";
 
-// When you move to Supabase, you only change the values in .env —
-// this file (and every query in index.js) stays exactly the same,
-// because Supabase's database IS Postgres.
-export const pool = new pg.Pool({
-  host: process.env.DB_HOST || "localhost",
-  port: Number(process.env.DB_PORT || 5432),
-  user: process.env.DB_USER || "postgres",
-  password: process.env.DB_PASSWORD || "postgres",
-  database: process.env.DB_NAME || "expense_tracker",
-  // Supabase requires SSL; local Postgres does not.
-  ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : false,
+const supabaseUrl = process.env.SUPABASE_URL || "";
+const supabaseServiceRoleKey = process.env.SUPABASE_KEY || "";
+
+if (!supabaseUrl) {
+  throw new Error("SUPABASE_URL is required");
+}
+
+if (!supabaseServiceRoleKey) {
+  throw new Error("SUPABASE_KEY is required");
+}
+
+export const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false,
+  },
 });

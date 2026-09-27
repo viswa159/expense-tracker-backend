@@ -1,6 +1,6 @@
 # Expense Tracker API
 
-Express + PostgreSQL API for the expense tracker frontend.
+Express API for the expense tracker frontend using Supabase via the server-side service role key.
 
 ## GitHub-ready setup
 
@@ -11,7 +11,7 @@ Express + PostgreSQL API for the expense tracker frontend.
 ## Local development
 
 1. Copy `.env.example` to `.env`.
-2. Fill in your PostgreSQL values.
+2. Fill in `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
 3. Set `ALLOWED_EMAILS` to the Gmail addresses that should be able to use the app.
 4. For local Firebase token verification, either:
    - set `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY`, or
@@ -22,11 +22,7 @@ Express + PostgreSQL API for the expense tracker frontend.
    npm install
    ```
 
-6. Run the schema:
-
-   ```bash
-   psql -U postgres -d expense_tracker -f schema.sql
-   ```
+6. Make sure your Supabase database already contains the tables from [schema.sql](C:/Users/Mahira/Documents/Workspace/expense-tracker-server/schema.sql).
 
 7. Start the API:
 
@@ -47,12 +43,8 @@ This repo is configured to deploy the API as a Firebase Cloud Function named `ap
 1. Install the Firebase CLI and log in.
 2. Keep `.firebaserc` pointed at the same Firebase project as the frontend.
 3. Configure runtime secrets / environment values for:
-   - `DB_HOST`
-   - `DB_PORT`
-   - `DB_USER`
-   - `DB_PASSWORD`
-   - `DB_NAME`
-   - `DB_SSL`
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
    - `ALLOWED_EMAILS`
    - optional `ALLOWED_ORIGINS`
 4. Deploy:
