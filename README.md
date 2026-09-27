@@ -36,21 +36,15 @@ Express API for the expense tracker frontend using Supabase via the server-side 
 - Only verified Google accounts listed in `ALLOWED_EMAILS` are accepted.
 - CORS only allows localhost dev origins by default plus any origins listed in `ALLOWED_ORIGINS`.
 
-## Firebase deployment
+## Deployment for Firebase Spark/free plan
 
-This repo is configured to deploy the API as a Firebase Cloud Function named `api`.
+Host this API outside Firebase (for example Render/Railway/Fly) and point the frontend `VITE_API_URL` to that backend URL.
 
-1. Install the Firebase CLI and log in.
-2. Keep `.firebaserc` pointed at the same Firebase project as the frontend.
-3. Configure runtime secrets / environment values for:
-   - `SUPABASE_URL`
-   - `SUPABASE_SERVICE_ROLE_KEY`
-   - `ALLOWED_EMAILS`
-   - optional `ALLOWED_ORIGINS`
-4. Deploy:
+Set environment values on your backend host:
 
-   ```bash
-   npm run deploy:firebase
-   ```
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `ALLOWED_EMAILS`
+- optional `ALLOWED_ORIGINS` (include your Firebase Hosting domain)
 
-The frontend Firebase Hosting config rewrites `/api/**` to this function, so both apps should target the same Firebase project.
+Firebase Cloud Functions deployment for this backend is optional and requires Blaze billing.
