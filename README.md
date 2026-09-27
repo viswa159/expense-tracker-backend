@@ -5,8 +5,8 @@ Express API for the expense tracker frontend using Supabase via the server-side 
 ## GitHub-ready setup
 
 - `.env` is now ignored by Git and should stay local.
-- Use `.env.example` as the template for local and Firebase configuration.
-- `node_modules` and Firebase local state are ignored.
+- Use `.env.example` as the template for local and production configuration.
+- `node_modules` are ignored.
 
 ## Local development
 
@@ -23,6 +23,7 @@ Express API for the expense tracker frontend using Supabase via the server-side 
    ```
 
 6. Make sure your Supabase database already contains the tables from [schema.sql](C:/Users/Mahira/Documents/Workspace/expense-tracker-server/schema.sql).
+   Re-run `schema.sql` after pulling backend updates so SQL functions such as `get_balances()` stay in sync.
 
 7. Start the API:
 
@@ -47,4 +48,4 @@ Set environment values on your backend host:
 - `ALLOWED_EMAILS`
 - optional `ALLOWED_ORIGINS` (include your Firebase Hosting domain)
 
-Firebase Cloud Functions deployment for this backend is optional and requires Blaze billing.
+This repo no longer includes Firebase Functions deployment files. If you want to deploy to Firebase Functions later, add those files back in a dedicated branch.

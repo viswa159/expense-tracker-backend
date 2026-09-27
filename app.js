@@ -93,40 +93,68 @@ async function fetchTransactions({ requestedMonth, requestedYear }) {
 }
 
 async function fetchBalances() {
-  const data = await fetchAllRows(
-    (from, to) =>
-      supabase
-        .from("trans")
-        .select("amount, transaction_kind, payment_method")
-        .order("id", { ascending: true })
-        .range(from, to),
-    "Unable to calculate balances"
-  );
+  const { data, error } = await supabase.rpc("get_balances").single();
+  if (error) {
+    if (typeof error.message === "string" && error.message.includes("get_balances")) {
+      throw new Error("Database function get_balances is missing. Apply the latest schema.sql migration.");
+    }
 
-  return data.reduce(
-    (balances, transaction) => {
-      const amount = Number(transaction.amount);
-      if (!Number.isFinite(amount)) {
-        throw new Error("Balance response contains invalid values");
-      }
+    throw createDatabaseError(error, "Unable to calculate balances");
+  }
 
-      if (transaction.transaction_kind === "income") {
-        balances.accountBalance += amount;
-        balances.netBalance += amount;
-        return balances;
-      }
+  const accountBalance = Number(data?.account_balance);
+  const netBalance = Number(data?.net_balance);
 
-      if (transaction.transaction_kind === "expense") {
-        balances.netBalance -= amount;
-        if (transaction.payment_method === "bank") {
-          balances.accountBalance -= amount;
-        }
-      }
+  if (!Number.isFinite(accountBalance) || !Number.isFinite(netBalance)) {
+    throw new Error("Balance response contains invalid values");
+  }
 
-      return balances;
-    },
-    { accountBalance: 0, netBalance: 0 }
-  );
+  return { accountBalance, netBalance };
+}
+
+function resolveRequestedPeriod({ requestedMonth, requestedYear }) {
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+
+  if (
+    Number.isInteger(requestedMonth) &&
+    Number.isInteger(requestedYear) &&
+    requestedMonth >= 1 &&
+    requestedMonth <= 12
+  ) {
+    return { month: requestedMonth, year: requestedYear };
+  }
+
+  return { month: currentMonth, year: currentYear };
+}
+
+async function fetchMonthlyTotals({ requestedMonth, requestedYear }) {
+  const { month, year } = resolveRequestedPeriod({ requestedMonth, requestedYear });
+  const { data, error } = await supabase
+    .rpc("get_monthly_totals", {
+      requested_month: month,
+      requested_year: year,
+    })
+    .single();
+
+  if (error) {
+    if (typeof error.message === "string" && error.message.includes("get_monthly_totals")) {
+      throw new Error("Database function get_monthly_totals is missing. Apply the latest schema.sql migration.");
+    }
+
+    throw createDatabaseError(error, "Unable to calculate monthly totals");
+  }
+
+  const monthIncome = Number(data?.month_income);
+  const monthExpense = Number(data?.month_expense);
+  const monthNetBalance = Number(data?.month_net_balance);
+
+  if (!Number.isFinite(monthIncome) || !Number.isFinite(monthExpense) || !Number.isFinite(monthNetBalance)) {
+    throw new Error("Monthly totals response contains invalid values");
+  }
+
+  return { monthIncome, monthExpense, monthNetBalance };
 }
 
 async function createTransaction(transaction) {
@@ -258,13 +286,16 @@ export function createApp() {
   app.get(
     "/api/balances",
     asyncHandler(async (req, res) => {
-      const { accountBalance, netBalance } = await fetchBalances();
+      const requestedMonth = Number(req.query.month);
+      const requestedYear = Number(req.query.year);
+      const [{ accountBalance, netBalance }, { monthIncome, monthExpense, monthNetBalance }] =
+        await Promise.all([fetchBalances(), fetchMonthlyTotals({ requestedMonth, requestedYear })]);
       if (!Number.isFinite(accountBalance) || !Number.isFinite(netBalance)) {
         res.status(500).json({ error: "Unable to calculate balances" });
         return;
       }
 
-      res.json({ accountBalance, netBalance });
+      res.json({ accountBalance, netBalance, monthIncome, monthExpense, monthNetBalance });
     })
   );
 

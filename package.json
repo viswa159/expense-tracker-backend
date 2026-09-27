@@ -2,11 +2,10 @@
   "name": "expense-tracker-server",
   "version": "1.0.0",
   "type": "module",
-  "main": "firebase.js",
+  "main": "index.js",
   "scripts": {
     "dev": "node --watch index.js",
-    "start": "node index.js",
-    "deploy:firebase": "firebase deploy --only functions:api"
+    "start": "node index.js"
   },
   "engines": {
     "node": ">=22"
@@ -17,7 +16,6 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "firebase-admin": "^13.5.0",
-    "firebase-functions": "^6.5.0",
     "uuid": "^14.0.2"
   }
 }
